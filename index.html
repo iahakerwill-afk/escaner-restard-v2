@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<title>HAKERWILL RESTARD · Escáner</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root{--g:#43a047;--o:#fb8c00;--r:#e53935;--gray:#607d8b;--blue:#1565c0}
+  *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
+  body{background:#0d1b2a;color:#fff;min-height:100vh;display:flex;flex-direction:column}
+  header{background:linear-gradient(135deg,#1565c0,#0d47a1);padding:12px 16px;text-align:center}
+  header b{color:#ffd54f}
+  .sub{font-size:11px;color:rgba(255,255,255,.7);letter-spacing:1px}
+  #reader{width:100%;max-width:480px;margin:10px auto;border-radius:16px;overflow:hidden}
+  #reader video{border-radius:16px}
+  .res{margin:10px auto;max-width:480px;width:calc(100% - 24px);border-radius:18px;padding:18px;text-align:center;min-height:120px;display:flex;flex-direction:column;justify-content:center;transition:.2s}
+  .res.idle{background:#16273a;color:#9fb3c8}
+  .res.g{background:var(--g)}.res.o{background:var(--o)}.res.r{background:var(--r)}.res.gray{background:var(--gray)}
+  .res .ic{font-size:46px;margin-bottom:6px}
+  .res .nm{font-size:20px;font-weight:900;line-height:1.2}
+  .res .ms{font-size:14px;margin-top:6px;opacity:.95}
+  .bar{display:flex;gap:8px;max-width:480px;width:calc(100% - 24px);margin:0 auto 14px}
+  .bar button{flex:1;padding:13px;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer}
+  .bp{background:#1565c0;color:#fff}.bo{background:#37474f;color:#fff}
+  .cfg{max-width:480px;margin:14px auto;width:calc(100% - 24px);background:#16273a;border-radius:14px;padding:16px;font-size:13px;color:#9fb3c8}
+  .foot{text-align:center;font-size:11px;color:#5c7align;padding:12px;color:#7d93a8}
+  .foot b{color:#ffd54f}
+  .count{font-size:12px;color:#9fb3c8;text-align:center;margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <div>🎓 <b>HAKERWILL RESTARD</b> · Escáner de Refrigerio</div>
+  <div class="sub">Apunta la cámara al código QR del estudiante</div>
+</header>
+
+<div id="reader"></div>
+<div class="count" id="count">Listo para escanear</div>
+<div class="res idle" id="res"><div class="ic">📷</div><div class="nm">Esperando código…</div><div class="ms">Acerca el QR del estudiante</div></div>
+<div class="bar">
+  <button class="bp" id="btnStart">▶️ Iniciar cámara</button>
+  <button class="bo" id="btnFlip">🔄 Cambiar cámara</button>
+</div>
+<div class="foot">Desarrollado por <b>HAKERWILL</b></div>
+
+<script>
+var qr=null, running=false, busy=false, lastCode='', lastTime=0, total=0, camId=null, cams=[], camIdx=0;
+var resEl=document.getElementById('res'), countEl=document.getElementById('count');
+
+function show(cls,ic,nm,ms){
+  resEl.className='res '+cls;
+  resEl.innerHTML='<div class="ic">'+ic+'</div><div class="nm">'+nm+'</div>'+(ms?'<div class="ms">'+ms+'</div>':'');
+}
+function idle(){ show('idle','📷','Listo para el siguiente','Acerca el QR del estudiante'); }
+
+function parseQR(text){
+  // El QR trae una URL tipo: .../exec?action=refri&doc=EST-123&col=COL-456
+  try{
+    var base=text.split('?')[0];
+    var q=text.indexOf('?')>=0?text.substring(text.indexOf('?')+1):'';
+    var params={}; q.split('&').forEach(function(p){var kv=p.split('=');if(kv[0])params[decodeURIComponent(kv[0])]=decodeURIComponent(kv[1]||'');});
+    if(!/^https?:\/\//.test(base)||!params.doc) return null;
+    return {base:base, doc:params.doc, col:params.col||'', action:params.action||'refri'};
+  }catch(e){ return null; }
+}
+
+function registrar(info){
+  busy=true; show('idle','⏳','Registrando…','');
+  var cbName='__cb'+Date.now();
+  var s=document.createElement('script');
+  var url=info.base+'?api=1&action='+encodeURIComponent(info.action)+'&doc='+encodeURIComponent(info.doc)+'&col='+encodeURIComponent(info.col)+'&callback='+cbName;
+  var done=false;
+  window[cbName]=function(r){
+    done=true; cleanup();
+    var nm=(r.estudiante&&r.estudiante.nombre)?r.estudiante.nombre:'';
+    var gr=(r.estudiante&&r.estudiante.grupo)?(' · '+r.estudiante.grupo):'';
+    if(r.success){ total++; countEl.textContent='Registrados en esta sesión: '+total;
+      show('g','✅',nm||'Registrado', 'Refrigerio registrado '+(r.hora||'')+gr);
+    } else if(r.noElegible){ show('gray','🚫', nm||'No recibe', 'No pertenece a la lista de refrigerio'+gr); }
+    else if(r.message && r.message.toLowerCase().indexOf('ya')>=0){ show('o','⚠️', nm||'', 'Ya recibió refrigerio hoy'+gr); }
+    else { show('r','❌','Error', r.message||'No se pudo registrar'); }
+    setTimeout(function(){ busy=false; idle(); }, 1500);
+  };
+  function cleanup(){ try{delete window[cbName];}catch(e){window[cbName]=null;} if(s&&s.parentNode)s.parentNode.removeChild(s); }
+  s.onerror=function(){ if(done)return; cleanup(); show('r','❌','Sin conexión','Revisa el internet e intenta de nuevo'); setTimeout(function(){busy=false;idle();},1500); };
+  s.src=url; document.head.appendChild(s);
+  // timeout de seguridad
+  setTimeout(function(){ if(!done){ cleanup(); show('r','❌','Tiempo agotado','Intenta de nuevo'); busy=false; setTimeout(idle,1200);} }, 12000);
+}
+
+function onScan(text){
+  var now=Date.now();
+  if(busy) return;
+  if(text===lastCode && (now-lastTime)<4000) return;  // evita doble lectura del mismo QR
+  lastCode=text; lastTime=now;
+  var info=parseQR(text);
+  if(!info){ show('r','❌','QR no válido','Usa el QR generado por el programa'); setTimeout(idle,1500); return; }
+  registrar(info);
+}
+
+function startWith(id){
+  qr=new Html5Qrcode('reader');
+  qr.start(id?{deviceId:{exact:id}}:{facingMode:'environment'},{fps:12,qrbox:{width:240,height:240}},
+    onScan, function(){})
+  .then(function(){ running=true; document.getElementById('btnStart').textContent='⏹️ Detener'; idle(); })
+  .catch(function(err){ show('r','❌','No se pudo abrir la cámara', String(err)+' — Debes abrir esta página por HTTPS y dar permiso de cámara.'); });
+}
+function start(){
+  Html5Qrcode.getCameras().then(function(devs){
+    cams=devs||[]; 
+    if(!cams.length){ show('r','❌','Sin cámara','No se detectó cámara en el dispositivo'); return; }
+    // prefiere cámara trasera
+    var back=cams.findIndex(function(c){return /back|trase|rear|environment/i.test(c.label);});
+    camIdx=back>=0?back:0; camId=cams[camIdx].id; startWith(camId);
+  }).catch(function(err){ startWith(null); });
+}
+function stop(){ if(qr&&running){ qr.stop().then(function(){qr.clear();running=false;document.getElementById('btnStart').textContent='▶️ Iniciar cámara';}).catch(function(){}); } }
+
+document.getElementById('btnStart').onclick=function(){ running?stop():start(); };
+document.getElementById('btnFlip').onclick=function(){
+  if(!cams.length){return;} camIdx=(camIdx+1)%cams.length; camId=cams[camIdx].id;
+  if(running){ qr.stop().then(function(){qr.clear();startWith(camId);}).catch(function(){startWith(camId);}); }
+};
+</script>
+</body>
+</html>
