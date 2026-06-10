@@ -48,6 +48,19 @@
 var qr=null, running=false, busy=false, lastCode='', lastTime=0, total=0, camId=null, cams=[], camIdx=0;
 var resEl=document.getElementById('res'), countEl=document.getElementById('count');
 
+/* Configuración: URL de la app y colegio. Llega por el botón del programa (?u=..&c=..) o se guarda en el navegador. */
+var CFG_U='', CFG_C='';
+(function(){
+  try{
+    var p=new URLSearchParams(location.search);
+    var u=p.get('u'), c=p.get('c');
+    if(u){ CFG_U=u; localStorage.setItem('hk_u',u); }
+    else { CFG_U=localStorage.getItem('hk_u')||''; }
+    if(c){ CFG_C=c; localStorage.setItem('hk_c',c); }
+    else { CFG_C=localStorage.getItem('hk_c')||''; }
+  }catch(e){}
+})();
+
 function show(cls,ic,nm,ms){
   resEl.className='res '+cls;
   resEl.innerHTML='<div class="ic">'+ic+'</div><div class="nm">'+nm+'</div>'+(ms?'<div class="ms">'+ms+'</div>':'');
@@ -55,14 +68,21 @@ function show(cls,ic,nm,ms){
 function idle(){ show('idle','📷','Listo para el siguiente','Acerca el QR del estudiante'); }
 
 function parseQR(text){
-  // El QR trae una URL tipo: .../exec?action=refri&doc=EST-123&col=COL-456
-  try{
-    var base=text.split('?')[0];
-    var q=text.indexOf('?')>=0?text.substring(text.indexOf('?')+1):'';
-    var params={}; q.split('&').forEach(function(p){var kv=p.split('=');if(kv[0])params[decodeURIComponent(kv[0])]=decodeURIComponent(kv[1]||'');});
-    if(!/^https?:\/\//.test(base)||!params.doc) return null;
-    return {base:base, doc:params.doc, col:params.col||'', action:params.action||'refri'};
-  }catch(e){ return null; }
+  text=String(text||'').trim();
+  // Caso 1: QR NUEVO con URL completa: .../exec?action=refri&doc=EST-123&col=COL-456
+  if(/^https?:\/\//.test(text) && text.indexOf('doc=')>=0){
+    try{
+      var base=text.split('?')[0];
+      var q=text.substring(text.indexOf('?')+1);
+      var params={}; q.split('&').forEach(function(p){var kv=p.split('=');if(kv[0])params[decodeURIComponent(kv[0])]=decodeURIComponent(kv[1]||'');});
+      if(params.doc) return {base:base, doc:params.doc, col:params.col||CFG_C, action:params.action||'refri'};
+    }catch(e){}
+  }
+  // Caso 2: QR ANTIGUO con solo el código (ej. EST-1777913435312) -> usa la URL y colegio configurados
+  if(text && CFG_U && CFG_C){
+    return {base:CFG_U.split('?')[0], doc:text, col:CFG_C, action:'refri'};
+  }
+  return null;
 }
 
 function registrar(info){
@@ -95,7 +115,11 @@ function onScan(text){
   if(text===lastCode && (now-lastTime)<4000) return;  // evita doble lectura del mismo QR
   lastCode=text; lastTime=now;
   var info=parseQR(text);
-  if(!info){ show('r','❌','QR no válido','Usa el QR generado por el programa'); setTimeout(idle,1500); return; }
+  if(!info){
+    if(!CFG_U||!CFG_C) show('r','⚙️','Falta configurar','Abre el lector desde el botón "📷 Abrir lector QR" dentro del programa.');
+    else show('r','❌','QR no válido','No se pudo leer el código.');
+    setTimeout(idle,2200); return;
+  }
   registrar(info);
 }
 
